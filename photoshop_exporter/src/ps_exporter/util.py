@@ -36,18 +36,19 @@ class XMLSettings( object ):
     
     # Read in current state of xml file, if it exists
     try:
+      print self.cfg_file_path
       self.cfgs = xml.dom.minidom.parse( self.cfg_file_path )
+      print 'reading xml'
       
     except ( xml.parsers.expat.ExpatError, IOError ):
-      print 'new doc'
       impl = xml.dom.minidom.getDOMImplementation( )
       self.cfgs = impl.createDocument( None, 'settings', None )
       self.top_element = self.cfgs.documentElement
       self.top_element.setAttribute( 'version', str( self.XML_SETTING_VER ) )
       self.load_ver = str( self.XML_SETTING_VER )
+      print 'new xml'
       
     else:
-      print 'reading doc'
       self.top_element = self.cfgs.documentElement
       self.load_ver = self.top_element.getAttribute( 'version' )
       
@@ -59,8 +60,6 @@ class XMLSettings( object ):
 
     settings = { }
     for node in self.top_element.childNodes:
-      print 'node'
-      print node.nodeName
       if node.nodeType == xml.dom.Node.ELEMENT_NODE:
         
         setting_name = node.nodeName
@@ -89,6 +88,7 @@ class XMLSettings( object ):
     if isinstance( settings, ( list, tuple ) ):
       data = { }
       for setting in settings:
+        setting = setting.replace( '_-_', ' ' )
         elements = self.cfgs.getElementsByTagName( setting )
         
         for element in elements:
@@ -102,6 +102,7 @@ class XMLSettings( object ):
         return None
       
     if isinstance( settings, basestring ):
+      settings = settings.replace( '_-_', ' ' )
       elements = self.cfgs.getElementsByTagName( settings )
       data = [ ]
       for element in elements:
@@ -123,6 +124,7 @@ class XMLSettings( object ):
     if element.getAttribute( 'type' ) == 'list':
       return_list = [ ]
       for node in element.getElementsByTagName( 'item' ):
+        print 'an item'
         return_list.append( self._get_setting( node ) )
   
       return return_list
@@ -132,8 +134,8 @@ class XMLSettings( object ):
       return_dict = { }
       for node in element.childNodes:
         if node.nodeType == node.ELEMENT_NODE:
-  
-          return_dict[ node.tagName ] = self._get_setting( node )
+          setting_name = node.tagName.replace( '_-_', ' ' ) 
+          return_dict[ setting_name ] = self._get_setting( node )
   
       return return_dict
     
@@ -170,7 +172,10 @@ class XMLSettings( object ):
         
       # Most likely an error
       return None
-        
+    
+    # nonetype
+    elif element.getAttribute( 'type' ) == 'none':
+      return None    
     
     # String Elements
     else:
@@ -185,6 +190,7 @@ class XMLSettings( object ):
         # If the node is empty
         data = ''
       return data
+    
   def set_settings( self, settings = { }, append = False, write = False ):
     
     for setting in settings.keys( ):
@@ -195,14 +201,14 @@ class XMLSettings( object ):
       self.write_settings( )
     
   def write_settings( self ):
-    
+
     if os.path.exists( self.cfg_file_path ):
       cfg_file_backup = shutil.copy2( self.cfg_file_path,
                                       '{0}.bak'.format( self.cfg_file_path ) )
     
-    cfg_file = open( self.cfg_file_path, 'w' )
-    cfg_file.write( self.cfgs.toxml( ) )
-    cfg_file.close( )
+    with open( self.cfg_file_path, 'wb' ) as cfg_file:
+      self.cfgs.writexml( cfg_file)
+
     
   def _set_setting( self,
                     setting,
@@ -211,6 +217,8 @@ class XMLSettings( object ):
                     append = False ):
     if parent == None:
       parent = self.top_element
+    
+    setting = setting.replace( ' ', '_-_')
     
     if parent.getElementsByTagName( setting ) and append == False:
       setting_node = parent.getElementsByTagName( setting )[ 0 ]
@@ -271,15 +279,19 @@ class XMLSettings( object ):
         setting_node.setAttribute( 'type', 'float' )
       
       # string values   
-      elif isinstance( value, str ):
+      elif isinstance( value, basestring ):
         setting_node.setAttribute( 'type', 'string' )
-        
+      
+      elif value == None:
+        setting_node.setAttribute( 'type', 'none' )  
+      
       else:
         raise Exception( 'type {0} is not currently a vaild type for storing settings'.format( type( value ) ) )
         
       setting_text = self.cfgs.createTextNode( str( value ) )
       setting_node.appendChild( setting_text )
       parent.appendChild( setting_node )
+
     
   def remove_settings_element( self, element ):
     

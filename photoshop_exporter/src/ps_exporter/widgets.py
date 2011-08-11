@@ -6,6 +6,7 @@ Created on Jul 24, 2011
 import Tkinter
 import win32com.client
 import functools
+import timeit
 
 class Widget( Tkinter.Frame ):
   """
@@ -31,12 +32,12 @@ class ChannelWidget( Widget ):
   """
   
   def __init__( self, parent, app, channel ):
-    
     self._channel = channel
     self._set_widgets = [ ]
     self._chan_cbxs = [ ]
     self._chan_vars = [ ]
-    
+    self.parent = parent
+    print channel.get_layersets()
     Widget.__init__( self, parent, app, pady = 3 )
     
   def add_layerset( self ):
@@ -67,18 +68,10 @@ class ChannelWidget( Widget ):
                                                    column = 1,
                                                    sticky = Tkinter.N + Tkinter.S)
     
-    self.sets_frame = Tkinter.Frame( self.border_frame, padx = 10 )
+    self.sets_frame = Tkinter.Frame( self.border_frame )
     self.sets_frame.grid( row = 0, column = 2 )
     
-    Tkinter.Frame( self.border_frame,
-                   width = 2,
-                   borderwidth = 2,
-                   relief = Tkinter.GROOVE ).grid( row = 0,
-                                                   column = 1,
-                                                   sticky = Tkinter.N + Tkinter.S)
     
-    self.chan_frame = Tkinter.Frame( self.border_frame, padx = 10 )
-    self.chan_frame.grid( row = 0, column = 4)
     
     #==========================================================================
     # Column 1 - Name
@@ -103,60 +96,67 @@ class ChannelWidget( Widget ):
     
   def refresh( self ):
     
-    chan_row = 0
-    chan_col = 0
+    
     
     #==========================================================================
     # Column 2 - Layerset
     #==========================================================================
     doc_layersets = [ ]
+    used_layersets = list( self._channel.get_layersets( ) )
     for ls in self._app.ps.ActiveDocument.LayerSets:
       doc_layersets.append( ls.Name )
-      
-    self._chan_layersets = self._channel.get_layersets( )
     ls_widgets = [ ]
     self._ls_vars = [ ]
     
     ls_i = 0
-    for ls in self._channel.get_layersets( ):
-      var = Tkinter.StringVar( self._app ) 
+    for ls in used_layersets:
+      if not ls == None:
+        used = set( used_layersets ) - set( ls )
+      else:
+        used = set( used_layersets )
+      om_layersets = [ x for x in doc_layersets if x not in used ]
       
+      ls_frame = Tkinter.Frame( self.sets_frame )
+      ls_frame.grid( column = 0, row = ls_i )
+      var = Tkinter.StringVar( self._app ) 
       var.set( ls )
-      print ls_i
-      ls_om = Tkinter.OptionMenu( self.sets_frame,
+      ls_om = Tkinter.OptionMenu( ls_frame,
                                   var,
-                                  *doc_layersets,
+                                  *om_layersets,
                                   command = functools.partial( self.handle_ls_change,
-                                                               ls_i  ) )
+                                                               ls  ) )
       ls_om.config( width = 30 )
-      ls_om.grid( row = ls_i, column = 0, rowspan = 2 )
+      
       ls_widgets.append( ls_om )
       self._ls_vars.append( var )
-      ls_i = ls_i + 2
+      ls_i = ls_i + 1
+      
+      ls_om.grid( row = 0, column = 0 )
+
+      # Divider
+      Tkinter.Frame( ls_frame,
+                     width = 2,
+                     borderwidth = 2,
+                     relief = Tkinter.GROOVE ).grid( row = 0,
+                                                     rowspan = 1,
+                                                     column = 1,
+                                                     sticky = Tkinter.N + Tkinter.S)
       
       #==========================================================================
       # Column 3 - Channels
       #==========================================================================
-  
-      doc_channels = self._app._export_doc.Channels
+
       
+      chan_cbx = MapChannelCheckBoxWidget( ls_frame, self._app, self._channel, ls )
+      chan_cbx.grid( row = 0, column = 2 )
+
+          
       
+                     
       
-      for channel in doc_channels:
-        var = Tkinter.IntVar( )
-        cbx = Tkinter.Checkbutton( self.chan_frame,
-                                   text = channel.Name,
-                                   variable = var )
-        cbx.grid( row = chan_row, column = chan_col, sticky = Tkinter.W )
-        
-        self._chan_cbxs.append( cbx )
-        self._chan_vars.append( var )
-        
-        if chan_row == 0:
-          chan_row = 1
-        else:
-          chan_row = 0
-          chan_col = chan_col + 1
+          
+   
+
       
   def handle_add_layerset( self ):
     """
@@ -166,15 +166,64 @@ class ChannelWidget( Widget ):
 
     self.refresh( )
     
-  def handle_ls_change( self, item, name ):
+  def handle_ls_change( self, orig, name ):
     """
     Handle changing a layerset in the channel to another
     """
 
-    self._chan_layersets[ item ] = name
-    self._channel.set_layersets( self._chan_layersets )
+    new_ls = self._channel.get_layersets( )
+    new_ls[ name ] = new_ls[ orig ]
+    del new_ls[ orig ]
+    self._channel.set_layersets( new_ls )
+    self.refresh( )
 
+class MapChannelCheckBoxWidget( Widget ):
+  
+  def __init__( self, parent, app, channel, layerset, *args, **kwargs ):
+    
+    self._map_channel = channel
+    self._boxes = [ ]
+    self._layerset = layerset
+    Widget.__init__( self, parent, app, *args, **kwargs )
+  
+  def build( self ):
+    doc_channels = self._app._active_doc.Channels
+    self._cbx_vars = [ ]
+    
+    row = 0
+    col = 0
+    for i in range( doc_channels.Count ):
+      chan = doc_channels[ i ]
+      var = Tkinter.IntVar( )
+      self._cbx_vars.append( var )
+      cbx = Tkinter.Checkbutton( self,
+                                 text = chan.Name,
+                                 variable = var,
+                                 command = self._handle_cbx )
       
+      cbx.grid( row = row, column = col, sticky = Tkinter.W )
+      
+      if col == 0:
+        col = 1
+      else:
+        col = 0,
+        row = row + 1
+    self.refresh( )
+        
+  def refresh( self ):
+    for i in range( len ( self._cbx_vars ) ):
+      if str( i ) in self._map_channel.get_layer_channels( self._layerset ):
+        self._cbx_vars[ i ] = True
+      else:
+        self._cbx_vars[ i ] = False
+    
+      
+  def _handle_cbx( self ):
+    for i in range( len ( self._cbx_vars ) ):
+      chan_str = ''
+      if self._cbx_vars[ i ].get( ) == True:
+        chan_str = chan_str + str( i )
+    self._map_channel.set_layer_channels( self._layerset, chan_str )
   
 class MapInfoWidget( Widget ):
   """
@@ -218,8 +267,10 @@ class MapInfoWidget( Widget ):
     self.om_type.grid( row = 0, column = 0, columnspan = 3 )
     
     if None in self._map.get_resolution( ):
-      resx = self._app.ps.ActiveDocument.Width
-      resy = self._app.ps.ActiveDocument.Height
+      resx = int( self._app.ps.ActiveDocument.Width )
+      resy = int( self._app.ps.ActiveDocument.Height )
+      self._map.set_resolution( [ resx, resy ] )
+
       
     else:
       resx = self._map.get_resolution( )[ 0 ]
@@ -274,7 +325,7 @@ class MapWidget( Widget ):
     self.refresh( )
 
   def refresh( self ):
-    
+    print self._map
     for channel_widget in self.channel_widgets:
       channel_widget.destroy( )
 

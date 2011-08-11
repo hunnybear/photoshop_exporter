@@ -4,14 +4,16 @@ Created on Jul 7, 2011
 @author: Tyler
 '''
 import Tkinter
+import tkMessageBox
 import win32com.client
 import pythoncom
+import pywintypes
 import os
 
 import widgets
 import xml_sidecar
 
-SIDECAR_EXT = 'scr'
+SIDECAR_EXT = 'sde'
 
 class Export( object ):
   """
@@ -21,13 +23,23 @@ class Export( object ):
   
   def __init__( self ):
     self._ps = win32com.client.Dispatch( 'Photoshop.Application' )
-    self._export_doc = self._ps.ActiveDocument
-    self._doc_loc = self._export_doc.FullName
+    try:
+      self._active_doc = self._ps.ActiveDocument
+    except pythoncom.com_error:
+      root = Tkinter.Tk()
+      root.withdraw() 
+      tkMessageBox.showerror( 'No file open',
+                              'There is currently no file open in Photoshop.',
+                              parent = None )
+      
+      raise Exception( 'No file currently open in Photoshop' )
+      
+    self._doc_loc = self._active_doc.FullName
     self._sidecar_loc = '{0}.{1}'.format( self._doc_loc, SIDECAR_EXT )
     if os.path.exists( self._sidecar_loc ):
       self.do_export( )
     else:
-      export_settings = ExportSettingsUI( doc = self._export_doc )
+      export_settings = ExportSettingsUI( doc = self._active_doc )
       
       
   def do_export( self ):
@@ -38,8 +50,8 @@ class Export( object ):
     """
     
     self.sidecar = xml_sidecar.XMLSidecar( self._sidecar_loc )
-    
-    for map in self.sidecar.get_maps( ):
+    print 'doing export'
+    for map in self.sidecar.get_maps( ).values( ):
       map.export( )
   
 
@@ -49,38 +61,50 @@ class ExportSettingsUI( Tkinter.Frame ):
 
     Tkinter.Frame.__init__( self, master )
     
-    self._maps = [ ]
+    self._maps = { }
     self.ps = win32com.client.Dispatch( 'Photoshop.Application' )
     
     # Set up doc and sidecar
     if doc == None:
-      print 'doc is none'
-      try: self._export_doc = self.ps.ActiveDocument
+      try: self._active_doc = self.ps.ActiveDocument
       except pythoncom.com_error:
-        return None
-    else:
-      self._export_doc = doc
+
+        root = Tkinter.Tk()
+        root.withdraw() 
+        tkMessageBox.showerror( 'No file open',
+                                'There is currently no file open in Photoshop.',
+                                parent = None )
       
-    self._sidecarXML = xml_sidecar.XMLSidecar( self._export_doc.FullName )
+        raise Exception( 'No file currently open in Photoshop' )
+    else:
+      self._active_doc = doc
     
-    self._doc_loc = self._export_doc.FullName
+    self._sidecar_loc = '{0}.{1}'.format( self._active_doc.FullName,
+                                          SIDECAR_EXT )  
+    
+    self._sidecarXML = xml_sidecar.XMLSidecar( self._sidecar_loc )
+    
+    self._doc_loc = self._active_doc.FullName
     self._sidecar_loc = '{0}.{1}'.format( self._doc_loc, SIDECAR_EXT )
     
     try:
-      for map in self._sidecarXML.get_maps( ):
-        self._maps.append( map )
+      for name, map in self._sidecarXML.get_maps( ).iteritems( ):
+        self._maps[ name ] = ( map )
     except TypeError:
       # No Maps
       new_map = xml_sidecar.Map( )
       new_map.set_name( 'New Map' )
       self._sidecarXML.add_map( new_map )
-      self._maps.append( new_map )
+      self._maps[ map.get_name( ) ] = ( map )
+    else:
+      for map in self._maps:
+        print map
       
     self.grid( )
     self.build( )
     
     self.master.title( 'PSD Export Settings' )
-    
+    self.mainloop( )
     
   def build( self ):
     """
@@ -112,15 +136,11 @@ class ExportSettingsUI( Tkinter.Frame ):
     self.btn_set_export_loc = Tkinter.Button( self.top_buttons,
                                               text = 'Set Export Location',
                                               command = self._handle_set_export_loc )
+    self.btn_set_export_loc.grid( row = 0, column = 2)
     
-    # Map Widgets setup
+    # Map Widgets setup  
     i = 0
-    maps = self._sidecarXML.get_maps( )
-    if maps == None:
-      return
-
-    for map in maps.values( ):
-
+    for map in self._maps.values( ):
       widgets.MapWidget( self.map_widgets, self, map ).grid( row = i, column = 0 )
       i = i + 1
       
@@ -129,23 +149,26 @@ class ExportSettingsUI( Tkinter.Frame ):
     self.btn_save_settings = Tkinter.Button( self.out_buttons,
                                              text = 'Save export settings',
                                              command = self._handle_save )
+    self.btn_save_settings.grid( row = 0, column = 0 )
     
-    self.btn_export_ = Tkinter.Button( self.out_buttons,
+    self.btn_export = Tkinter.Button( self.out_buttons,
                                        text = 'Save settings and Export',
                                        command = self._handle_save_and_export )
+    self.btn_export.grid( row = 0, column = 1 )
   
   def export( self ):
     """
     export all maps.
     """
     
-    for map in self._sidecarXML.get_maps( ):
+    for map in self._maps.values( ):
       map.export( )
       
   def save_sidecar( self ):
     """
     Save the sidecar file(s)
     """
+    self._sidecarXML.set_maps( self._maps )  
     self._sidecarXML.write_settings( )
          
   def _handle_new_map( self ):
